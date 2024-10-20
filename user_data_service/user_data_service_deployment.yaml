@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-data-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-data-service
+  template:
+    metadata:
+      labels:
+        app: user-data-service
+    spec:
+      containers:
+        - name: user-data-service
+          image: <ACR_LOGIN_SERVER>/myapp/user_data_service:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: DB_URL
+              value: "postgresql://adminuser:P@ssw0rd1234!@postgresql:5432/userdb"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-data-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5000
+      targetPort: 5000
+  selector:
+    app: user-data-service

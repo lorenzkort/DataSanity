@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yaml-generation-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yaml-generation-service
+  template:
+    metadata:
+      labels:
+        app: yaml-generation-service
+    spec:
+      containers:
+        - name: yaml-generation-service
+          image: <ACR_LOGIN_SERVER>/myapp/yaml_generation_service:latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yaml-generation-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5001
+      targetPort: 5001
+  selector:
+    app: yaml-generation-service

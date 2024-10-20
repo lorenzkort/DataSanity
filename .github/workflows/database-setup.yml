@@ -1,0 +1,30 @@
+name: Setup PostgreSQL Database
+
+on:
+  push:
+    branches:
+      - main  # Change to the branch you want to trigger this action
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
+
+jobs:
+  setup-database:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up PostgreSQL
+        uses: postgres-action/setup-postgres@v1
+        with:
+          postgres version: '13'
+          # Set environment variables for your database connection
+          db_user: ${{ secrets.DB_USER }}          # Add your db username as a secret
+          db_password: ${{ secrets.DB_PASSWORD }}    # Add your db password as a secret
+          db_name: ${{ secrets.DB_NAME }}            # Add your db name as a secret
+          db_host: ${{ secrets.DB_HOST }}            # Add your db host as a secret
+
+      - name: Execute SQL scripts
+        run: |
+          psql -h ${{ secrets.DB_HOST }} -U ${{ secrets.DB_USER }} -d ${{ secrets.DB_NAME }} -f ./path/to/your/script.sql
+

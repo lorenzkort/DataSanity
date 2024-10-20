@@ -1,17 +1,76 @@
 version: '3.8'
 
 services:
-  postgres:
+  api_gateway:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - user_data_service
+      - claude_integration_service
+      - yaml_generation_service
+      - dashboard_creation_service
+
+  user_data_service:
+    build: ./user_data_service
+    context: ./user_data_service
+    environment:
+      - DB_URL=postgresql://user:password@db:5432/userdb
+    depends_on:
+      - db
+
+  claude_integration_service:
+    build: ./claude_integration_service
+    environment:
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+    depends_on:
+      - rabbitmq
+
+  yaml_generation_service:
+    build: ./yaml_generation_service
+    depends_on:
+      - rabbitmq
+
+  dashboard_creation_service:
+    build: ./dashboard_creation_service
+    environment:
+      - METABASE_URL=http://metabase:3000
+      - METABASE_USERNAME=admin@example.com
+      - METABASE_PASSWORD=metabasepass
+    depends_on:
+      - metabase
+      - rabbitmq
+
+  metabase:
+    image: metabase/metabase:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - MB_DB_TYPE=postgres
+      - MB_DB_DBNAME=metabase
+      - MB_DB_PORT=5432
+      - MB_DB_USER=metabase
+      - MB_DB_PASS=metabasepass
+      - MB_DB_HOST=db
+    depends_on:
+      - db
+
+  db:
     image: postgres:13
     environment:
-      POSTGRES_USER: adminuser
-      POSTGRES_PASSWORD: jfjjfjff
-      POSTGRES_DB: userdb
-    ports:
-      - "5432:5432"
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=userdb
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
 
 volumes:
-  postgres-data:
-    driver: local
+  pgdata:

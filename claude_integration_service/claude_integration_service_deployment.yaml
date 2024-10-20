@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-integration-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: claude-integration-service
+  template:
+    metadata:
+      labels:
+        app: claude-integration-service
+    spec:
+      containers:
+        - name: claude-integration-service
+          image: <ACR_LOGIN_SERVER>/myapp/claude_integration_service:latest
+          env:
+            - name: CLAUDE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claude-api-key-secret
+                  key: api-key
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-integration-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: claude-integration-service
