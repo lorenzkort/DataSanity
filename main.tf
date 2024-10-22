@@ -1,103 +1,128 @@
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
+  }
+}
 provider "azurerm" {
   features {}
 }
 
-resource "azurerm_resource_group" "main" {
-  name     = "DataSanityTest"
-  location = "West Europe"
+provider "null" {
+  # No configuration needed for null provider
 }
 
-resource "azurerm_container_registry" "acr" {
-  name                = "datasanityregistrytest"  # Ensure unique name
+data "azurerm_client_config" "current" {}
+
+resource "azurerm_resource_group" "main" {
+  name     = "rg-sql-lineage-${var.environment}"
+  location = var.location
+}
+
+resource "azurerm_service_plan" "main" {
+  name                = "asp-sql-lineage-${var.environment}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  os_type            = "Linux"
+  sku_name           = "B1"
+}
+
+resource "azurerm_key_vault" "main" {
+  name                = "kv-sql-lineage-${var.environment}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  tenant_id          = data.azurerm_client_config.current.tenant_id
+  sku_name           = "standard"
+
+  access_policy {
+    tenant_id = data.azurerm_client_config.current.tenant_id
+    object_id = data.azurerm_client_config.current.object_id
+
+    secret_permissions = [
+      "Get",
+      "List",
+      "Set",
+      "Delete"
+    ]
+  }
+}
+
+resource "azurerm_key_vault_secret" "claude_api_key" {
+  name         = "claude-api-key"
+  value        = var.claude_api_key
+  key_vault_id = azurerm_key_vault.main.id
+}
+
+resource "azurerm_container_registry" "main" {
+  name                = "acrsqllineage${var.environment}"
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   sku                 = "Basic"
   admin_enabled       = true
+}
 
-  lifecycle {
-    prevent_destroy = true  # Prevent accidental deletion during testing
+# Create the web app first
+resource "azurerm_linux_web_app" "main" {
+  name                = "app-sql-lineage-${var.environment}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  service_plan_id     = azurerm_service_plan.main.id
+
+  site_config {
+    application_stack {
+      docker_image_name   = "${azurerm_container_registry.main.login_server}/sql-lineage:latest"
+      docker_registry_url = "https://${azurerm_container_registry.main.login_server}"
+    }
   }
-}
 
-resource "azurerm_postgresql_server" "main" {
-  name                = "datasanitypostgres"  # Ensure unique name
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-  administrator_login = "adminuser"
-  administrator_login_password = "jfjjfjff"  # Ensure strong password in production
-  sku_name            = "B_Gen5_1"  # Keep for test, consider lower tier for even cheaper
-  storage_mb          = 512          # Reduced storage
-  version             = "13"         # Use a newer version for long-term viability
-  ssl_enforcement_enabled = true
-
-  timeouts {
-    create = "30m"  # Set a timeout for resource creation
-    delete = "30m"  # Set a timeout for resource deletion
-  }
-}
-
-resource "azurerm_postgresql_database" "datasanitydb" {
-  name                = "userdb"
-  resource_group_name = azurerm_resource_group.main.name
-  server_name         = azurerm_postgresql_server.main.name
-  charset             = "UTF8"
-  collation           = "English_United States.1252"
-}
-
-output "db_url" {
-  value = "postgresql://${azurerm_postgresql_server.main.administrator_login}:${azurerm_postgresql_server.main.administrator_login_password}@${azurerm_postgresql_server.main.fqdn}:5432/${azurerm_postgresql_database.datasanitydb.name}?sslmode=require"
-}
-
-resource "azurerm_virtual_network" "main" {
-  name                = "app-vnet-test"  # Different name for test
-  address_space       = ["10.0.0.0/16"]
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-}
-
-resource "azurerm_subnet" "internal" {
-  name                 = "internal"
-  resource_group_name  = azurerm_resource_group.main.name
-  virtual_network_name = azurerm_virtual_network.main.name
-  address_prefixes     = ["10.0.1.0/24"]
-}
-
-resource "azurerm_rabbitmq_cluster" "rabbitmq" {
-  name                = "my-apptest-rabbitmq"  # Different name for test
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-  sku                 = "Standard"  # Consider using the lowest SKU available
-
-  lifecycle {
-    prevent_destroy = true  # Prevent accidental deletion during testing
-  }
-}
-
-resource "azurerm_kubernetes_cluster" "aks" {
-  name                = "app-k8s-cluster-test"  # Different name for test
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-  dns_prefix          = "datasanity-k8s-test"  # Different DNS prefix for test
-
-  default_node_pool {
-    name       = "default"
-    node_count = 1  # Keep this minimal during testing
-    vm_size    = "Standard_B2s"  # Smaller VM size for cost efficiency
+  app_settings = {
+    "WEBSITES_PORT"                  = "8000"
+    "SCM_DO_BUILD_DURING_DEPLOYMENT" = "true"
   }
 
   identity {
     type = "SystemAssigned"
   }
+}
 
-  network_profile {
-    network_plugin    = "azure"
-    service_cidr      = "10.0.0.0/16"
-    dns_service_ip    = "10.0.0.10"
-    docker_bridge_cidr = "172.17.0.1/16"
+# Create access policy for web app
+resource "azurerm_key_vault_access_policy" "webapp" {
+  key_vault_id = azurerm_key_vault.main.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_linux_web_app.main.identity[0].principal_id
+
+  secret_permissions = [
+    "Get",
+    "List"
+  ]
+
+  depends_on = [
+    azurerm_linux_web_app.main
+  ]
+}
+
+# Update the web app settings after access policy is created
+resource "null_resource" "update_app_settings" {
+  triggers = {
+    app_settings = "${azurerm_key_vault_secret.claude_api_key.version}"
   }
 
-  timeouts {
-    create = "30m"  # Set a timeout for resource creation
-    delete = "30m"  # Set a timeout for resource deletion
+  provisioner "local-exec" {
+    command = <<EOT
+      az webapp config appsettings set \
+        --name ${azurerm_linux_web_app.main.name} \
+        --resource-group ${azurerm_resource_group.main.name} \
+        --settings ANTHROPIC_API_KEY="@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.claude_api_key.versionless_id})"
+    EOT
   }
+
+  depends_on = [
+    azurerm_key_vault_access_policy.webapp
+  ]
 }

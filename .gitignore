@@ -1,0 +1,9 @@
+# Terraform files
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+crash.log
+
+# mac files
+*.DS_Store
